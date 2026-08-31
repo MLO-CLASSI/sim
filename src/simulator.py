@@ -1,21 +1,18 @@
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 from astropy import constants as const, units as u
-
-SIM_DIR = Path(__file__).resolve().parent
-DATA_DIR = SIM_DIR.parent / "data"
+from shared_data import CSV_FILES
 
 TELESCOPE_DIAMETER = 1.25 * u.m
 OBSTRUCTION_DIAMETER = 0.30 * TELESCOPE_DIAMETER
 TELESCOPE_AREA = np.pi * (TELESCOPE_DIAMETER**2 - OBSTRUCTION_DIAMETER**2) / 4
 FLUX_DENSITY_UNIT = u.erg / u.s / u.cm**2 / u.AA
 
-PALOMAR_EXTINCTION = pd.read_csv(DATA_DIR / "csv files/palomar_atm_ext_per_airmass.csv",
+PALOMAR_EXTINCTION = pd.read_csv(CSV_FILES["palomar_atm_ext_per_airmass"],
                                  header=None, names=["wav", "ext"])
 
 
@@ -37,10 +34,9 @@ class ThroughputCurve:
             raise ValueError("wavelength and throughput must have the same shape.")
 
     def __call__(self, wavelength: u.Quantity) -> np.ndarray:
-        wavelength = u.Quantity(wavelength).to(self.wavelength.unit)
         return np.interp(
-            wavelength.value,
-            self.wavelength.value,
+            wavelength.to_value(u.AA),
+            self.wavelength.to_value(u.AA),
             self.throughput,
             left=self.fill_value,
             right=self.fill_value,

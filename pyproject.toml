@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spectrograph-sim"
+version = "0.1.0"
+description = "Detector and instrument simulator for the MLO spectrograph"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "astropy",
+    "numpy",
+    "pandas",
+    "shared-data",
+]
+
+[tool.setuptools]
+packages = ["sim"]
+package-dir = {sim = "src"}

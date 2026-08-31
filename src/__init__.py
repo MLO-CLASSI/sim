@@ -1,6 +1,6 @@
 """MLO spectrograph simulation models."""
 
-from .simulator import (
+from .core import (
     AtmosphericExtinction,
     DetectorModel,
     InstrumentSimulator,

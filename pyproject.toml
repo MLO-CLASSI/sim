@@ -19,5 +19,5 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["sim"]
-package-dir = {sim = "src"}
+packages = ["simulator"]
+package-dir = {simulator = "src"}

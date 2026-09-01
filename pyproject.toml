@@ -15,7 +15,7 @@ dependencies = [
     "astropy",
     "numpy",
     "pandas",
-    "shared-data",
+    "spectrograph-shared-data",
 ]
 
 [tool.setuptools]

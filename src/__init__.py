@@ -1,4 +1,4 @@
-"""MLO spectrograph simulation models."""
+"""MLO CLASSI spectrograph simulation models."""
 
 from .core import (
     AtmosphericExtinction,

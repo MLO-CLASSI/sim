@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "spectrograph-sim"
+name = "classi-sim"
 version = "0.1.0"
-description = "Detector and instrument simulator for the MLO spectrograph"
+description = "Detector and instrument simulator for the MLO CLASSI spectrograph"
 readme = "README.md"
 authors = [
     {name = "Caden Gobat", email = "cgobat@sdsu.edu"},
@@ -15,7 +15,7 @@ dependencies = [
     "astropy",
     "numpy",
     "pandas",
-    "spectrograph-shared-data",
+    "classi-shared-data",
 ]
 
 [tool.setuptools]

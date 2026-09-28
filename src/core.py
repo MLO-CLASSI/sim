@@ -245,6 +245,7 @@ class InstrumentSimulator:
         flux_density: u.Quantity,
         exposure: u.Quantity,
         vignetting=None,
+        fiber_coupling_efficiency=1.0,
     ) -> u.Quantity:
         wavelength = u.Quantity(wavelength).to(u.AA)
         flux_density = u.Quantity(flux_density).to(FLUX_DENSITY_UNIT)
@@ -306,6 +307,30 @@ class InstrumentSimulator:
             * u.electron
         )
 
+        coupling = np.asarray(
+            u.Quantity(fiber_coupling_efficiency).to_value(
+                u.dimensionless_unscaled
+            ),
+            dtype=float,
+        )
+        if coupling.ndim == 0:
+            if not 0 <= coupling.item() <= 1:
+                raise ValueError(
+                    "fiber_coupling_efficiency must be between 0 and 1."
+                )
+            expected_electrons *= coupling.item()
+        elif coupling.shape == (self.spectrograph.fiber_count,):
+            if np.any((coupling < 0) | (coupling > 1)):
+                raise ValueError(
+                    "fiber_coupling_efficiency values must be between 0 and 1."
+                )
+            expected_electrons *= coupling[:, np.newaxis]
+        else:
+            raise ValueError(
+                "fiber_coupling_efficiency must be a scalar or contain one "
+                "value per fiber."
+            )
+
         x_centers = self.spectrograph.wavelength_to_x(wavelength)
         image = np.zeros((self.detector.ny, self.detector.nx), dtype=float) * u.electron
 
@@ -343,27 +368,24 @@ class InstrumentSimulator:
         if np.any(wavelength_steps <= 0 * wavelength.unit):
             raise ValueError("wavelength samples must be unique.")
 
-        target_step = (
-            abs(self.spectrograph.dispersion)
-            * self.spectrograph.render_sampling_px
-            * u.pixel
-        ).to(wavelength.unit)
-        if target_step.value <= 0:
-            raise ValueError("render_sampling_px and dispersion must be non-zero.")
-
-        if np.all(wavelength_steps <= target_step):
+        x = self.spectrograph.wavelength_to_x(wavelength).to_value(u.pixel)
+        x_steps = np.abs(np.diff(x))
+        if np.all(x_steps <= self.spectrograph.render_sampling_px):
             return wavelength, flux_density
 
-        span = wavelength[-1] - wavelength[0]
-        uniform_count = int(np.ceil((span / target_step).value)) + 1
-        uniform_wavelength = (
-            np.linspace(
-                wavelength[0].value,
-                wavelength[-1].value,
-                uniform_count,
+        span_px = abs(x[-1] - x[0])
+        uniform_count = (
+            int(
+                np.ceil(
+                    span_px / self.spectrograph.render_sampling_px
+                )
             )
-            * wavelength.unit
+            + 1
         )
+        uniform_x = np.linspace(x[0], x[-1], uniform_count) * u.pixel
+        uniform_wavelength = self.spectrograph.x_to_wavelength(
+            uniform_x
+        ).to(wavelength.unit)
 
         render_wavelength = (
             np.unique(
@@ -407,12 +429,14 @@ class InstrumentSimulator:
         vignetting=None,
         add_noise: bool = True,
         seed: int = None,
+        fiber_coupling_efficiency=1.0,
     ) -> u.Quantity:
         image_e = self.render_electrons(
             wavelength=wavelength,
             flux_density=flux_density,
             exposure=exposure,
             vignetting=vignetting,
+            fiber_coupling_efficiency=fiber_coupling_efficiency,
         )
 
         if not add_noise:

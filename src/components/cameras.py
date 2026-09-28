@@ -39,22 +39,25 @@ class DetectorModel:
         expected_values = np.clip(expected_e.to_value(u.electron), 0, None)
         noisy_e = rng.poisson(expected_values).astype(float) * u.electron
 
-        if self.read_noise.value > 0:
-            noisy_e += (
-                rng.normal(
-                    0.0,
-                    self.read_noise.to_value(u.electron),
-                    size=noisy_e.shape,
-                )
-                * u.electron
-            )
-
+        # Full well limits the accumulated charge before the detector is read.
+        # Read noise is introduced afterward and therefore should not itself be
+        # clipped by the physical full-well capacity.
         if self.full_well is not None:
             noisy_e = (
                 np.clip(
                     noisy_e.to_value(u.electron),
                     0,
                     self.full_well.to_value(u.electron),
+                )
+                * u.electron
+            )
+
+        if self.read_noise.value > 0:
+            noisy_e += (
+                rng.normal(
+                    0.0,
+                    self.read_noise.to_value(u.electron),
+                    size=noisy_e.shape,
                 )
                 * u.electron
             )

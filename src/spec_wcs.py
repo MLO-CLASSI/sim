@@ -320,7 +320,7 @@ class LongSlitWCS(SlicedLowLevelWCS):
 
     def to_fits(self, relax=None, key=None):
         """Serialize the parent WCS as an HDUList using CDi_j notation."""
-        hdulist = self._parent_wcs.to_fits(*args, **kwargs)
+        hdulist = self._parent_wcs.to_fits(relax=relax, key=key)
 
         hdulist[0].header = self._convert_header_to_cd(hdulist[0].header, key=key)
         return hdulist

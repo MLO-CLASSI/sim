@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from astropy import constants as const, units as u
 from shared_data import CSV_FILES
+from .components import DetectorModel, ThroughputCurve
 
 TELESCOPE_DIAMETER = 1.25 * u.m
 OBSTRUCTION_DIAMETER = 0.30 * TELESCOPE_DIAMETER
@@ -14,49 +15,6 @@ FLUX_DENSITY_UNIT = u.erg / u.s / u.cm**2 / u.AA
 
 PALOMAR_EXTINCTION = pd.read_csv(CSV_FILES["palomar_atm_ext_per_airmass"],
                                  header=None, names=["wav", "ext"])
-
-
-@dataclass
-class ThroughputCurve:
-    wavelength: u.Quantity
-    throughput: np.ndarray
-    name: str = ""
-    fill_value: float = 0.0
-
-    def __post_init__(self) -> None:
-        self.wavelength = u.Quantity(self.wavelength)
-        if self.wavelength.unit == u.dimensionless_unscaled:
-            raise u.UnitConversionError("Throughput wavelength values must have units.")
-
-        throughput = u.Quantity(self.throughput)
-        self.throughput = throughput.to_value(u.dimensionless_unscaled)
-        if self.wavelength.shape != self.throughput.shape:
-            raise ValueError("wavelength and throughput must have the same shape.")
-
-    def __call__(self, wavelength: u.Quantity) -> np.ndarray:
-        return np.interp(
-            wavelength.to_value(u.AA),
-            self.wavelength.to_value(u.AA),
-            self.throughput,
-            left=self.fill_value,
-            right=self.fill_value,
-        )
-
-    @classmethod
-    def from_csv(
-        cls,
-        fname,
-        name: str = "",
-        fill_value: float = 0.0,
-        wavelength_unit: u.UnitBase = u.nm,
-    ):
-        df = pd.read_csv(fname, header=None, names=["wav", "tx"])
-        return cls(
-            df["wav"].values * wavelength_unit,
-            df["tx"].values,
-            name,
-            fill_value,
-        )
 
 
 class AtmosphericExtinction(ThroughputCurve):
@@ -73,62 +31,6 @@ class AtmosphericExtinction(ThroughputCurve):
 
 
 @dataclass
-class DetectorModel:
-    nx: int
-    ny: int
-    pixel_size: u.Quantity
-    gain: u.Quantity = 1.0 * u.electron / u.adu
-    read_noise: u.Quantity = 0.0 * u.electron
-    dark_current: u.Quantity = 0.0 * u.electron / u.s
-    bias: u.Quantity = 0.0 * u.adu
-    full_well: u.Quantity | None = None
-
-    def __post_init__(self) -> None:
-        self.pixel_size = u.Quantity(self.pixel_size).to(u.um)
-        self.gain = u.Quantity(self.gain).to(u.electron / u.adu)
-        self.read_noise = u.Quantity(self.read_noise).to(u.electron)
-        self.dark_current = u.Quantity(self.dark_current).to(u.electron / u.s)
-        self.bias = u.Quantity(self.bias).to(u.adu)
-        if self.full_well is not None:
-            self.full_well = u.Quantity(self.full_well).to(u.electron)
-
-    def apply_noise(
-        self,
-        image_e: u.Quantity,
-        exposure: u.Quantity,
-        rng: np.random.Generator,
-    ) -> u.Quantity:
-        image_e = u.Quantity(image_e).to(u.electron)
-        exposure = u.Quantity(exposure).to(u.s)
-
-        expected_e = image_e + self.dark_current * exposure
-        expected_values = np.clip(expected_e.to_value(u.electron), 0, None)
-        noisy_e = rng.poisson(expected_values).astype(float) * u.electron
-
-        if self.read_noise.value > 0:
-            noisy_e += (
-                rng.normal(
-                    0.0,
-                    self.read_noise.to_value(u.electron),
-                    size=noisy_e.shape,
-                )
-                * u.electron
-            )
-
-        if self.full_well is not None:
-            noisy_e = (
-                np.clip(
-                    noisy_e.to_value(u.electron),
-                    0,
-                    self.full_well.to_value(u.electron),
-                )
-                * u.electron
-            )
-
-        return (noisy_e / self.gain).to(u.adu) + self.bias
-
-
-@dataclass
 class SpectrographModel:
     detector: DetectorModel
     groove_density: u.Quantity
@@ -139,7 +41,7 @@ class SpectrographModel:
     fiber_core_diameter: u.Quantity
     diffraction_order: int = 1
     fiber_count: int = 1
-    fiber_pitch: u.Quantity = 0.0 * u.um
+    fiber_pitch: u.Quantity = 250.0 * u.um
     wavelength_increases_with_x: bool = False
     kernel_radius_sigma: float = 4.0
     render_sampling_px: float = 0.5
@@ -265,6 +167,35 @@ class SpectrographModel:
         if self.wavelength_increases_with_x:
             return self.x_center + detector_offset
         return self.x_center - detector_offset
+
+    def x_to_wavelength(self, x: u.Quantity) -> u.Quantity:
+        x = u.Quantity(x, u.pixel)
+
+        if self.wavelength_increases_with_x:
+            detector_offset = x - self.x_center
+        else:
+            detector_offset = self.x_center - x
+
+        field_angle = np.arctan(
+            (
+                detector_offset
+                * self.detector.pixel_size
+                / (u.pixel * self.camera_focal_length)
+            ).to_value(u.dimensionless_unscaled)
+        ) * u.rad
+
+        diffraction_angle = self.diffraction_angle + field_angle
+
+        wavelength = (
+            self.groove_spacing
+            * (
+                np.sin(self.incidence_angle)
+                + np.sin(diffraction_angle)
+            )
+            / self.diffraction_order
+        )
+
+        return wavelength.to(u.AA)
 
     def fiber_trace_centers(self) -> u.Quantity:
         offsets = (

@@ -1,5 +1,5 @@
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,14 @@ class DetectorModel:
     dark_current: u.Quantity = 0.0 * u.electron / u.s
     bias: u.Quantity = 0.0 * u.adu
     full_well: u.Quantity | None = None
+    binning: int = 1
+
+    native_nx: int = field(init=False)
+    native_ny: int = field(init=False)
+    native_pixel_size: u.Quantity = field(init=False, repr=False)
+    native_read_noise: u.Quantity = field(init=False, repr=False)
+    native_dark_current: u.Quantity = field(init=False, repr=False)
+    native_full_well: u.Quantity | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.pixel_size = u.Quantity(self.pixel_size).to(u.um)
@@ -25,6 +33,43 @@ class DetectorModel:
         self.bias = u.Quantity(self.bias).to(u.adu)
         if self.full_well is not None:
             self.full_well = u.Quantity(self.full_well).to(u.electron)
+
+        if (
+            isinstance(self.binning, bool)
+            or not isinstance(self.binning, (int, np.integer))
+            or self.binning < 1
+        ):
+            raise ValueError("binning must be a positive integer.")
+        self.binning = int(self.binning)
+
+        if self.nx % self.binning != 0 or self.ny % self.binning != 0:
+            raise ValueError(
+                "binning must evenly divide both detector dimensions."
+            )
+
+        self.native_nx = self.nx
+        self.native_ny = self.ny
+        self.native_pixel_size = self.pixel_size.copy()
+        self.native_read_noise = self.read_noise.copy()
+        self.native_dark_current = self.dark_current.copy()
+        self.native_full_well = (
+            None if self.full_well is None else self.full_well.copy()
+        )
+
+        if self.binning > 1:
+            bin_area = self.binning**2
+            self.nx //= self.binning
+            self.ny //= self.binning
+            self.pixel_size = self.native_pixel_size * self.binning
+
+            # Model square CMOS binning as the sum of independent native
+            # pixels. Area-dependent charge terms scale with the number of
+            # native pixels, while independent read-noise terms add in
+            # quadrature. Gain and the output bias pedestal are left unchanged.
+            self.dark_current = self.native_dark_current * bin_area
+            self.read_noise = self.native_read_noise * np.sqrt(bin_area)
+            if self.native_full_well is not None:
+                self.full_well = self.native_full_well * bin_area
 
     def apply_noise(
         self,
@@ -84,6 +129,7 @@ FLI_AR571 = DetectorModel(
     dark_current=0.002*u.electron/u.s,
     bias=200*u.adu,
     full_well=50000.0*u.electron,
+    binning=2,
 )
 
 QHY_268M = DetectorModel(

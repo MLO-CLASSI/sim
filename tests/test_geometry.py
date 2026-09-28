@@ -10,12 +10,12 @@ def test_imx571_reference_geometry(imx571_spectrograph):
     model = imx571_spectrograph
 
     assert_allclose(model.central_wavelength.to_value(u.AA), 6263.304030251207, rtol=1e-12)
-    assert_allclose(model.dispersion.to_value(u.AA / u.pixel), 1.1777480847183388, rtol=1e-12)
+    assert_allclose(model.dispersion.to_value(u.AA / u.pixel), 2.3554961694366776, rtol=1e-12)
     assert_allclose(model.magnification.value, 0.5555555555555556, rtol=1e-12)
     assert_allclose(model.anamorphic_factor.value, 0.9024739339201835, rtol=1e-12)
-    assert_allclose(model.fiber_pitch_px.to_value(u.pixel), 36.938534278959814, rtol=1e-12)
-    assert_allclose(model.spatial_fwhm_px.to_value(u.pixel), 15.514184397163122, rtol=1e-12)
-    assert_allclose(model.spectral_fwhm_px.to_value(u.pixel), 14.001147024470933, rtol=1e-12)
+    assert_allclose(model.fiber_pitch_px.to_value(u.pixel), 18.469267139479907, rtol=1e-12)
+    assert_allclose(model.spatial_fwhm_px.to_value(u.pixel), 7.757092198581561, rtol=1e-12)
+    assert_allclose(model.spectral_fwhm_px.to_value(u.pixel), 7.000573512235467, rtol=1e-12)
 
 
 def test_central_wavelength_maps_to_detector_center(imx571_spectrograph):

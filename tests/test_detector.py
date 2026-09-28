@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from astropy import units as u
 from numpy.testing import assert_allclose
 
@@ -70,3 +71,56 @@ def test_detector_noise_is_reproducible_for_fixed_seed():
     second = detector.apply_noise(image, 30 * u.s, np.random.default_rng(12345))
 
     assert_allclose(first.value, second.value, rtol=0, atol=0)
+
+
+def test_detector_binning_scales_geometry_and_noise():
+    detector = DetectorModel(
+        nx=6244,
+        ny=4168,
+        pixel_size=3.76 * u.um,
+        gain=0.5 * u.electron / u.adu,
+        read_noise=1.0 * u.electron,
+        dark_current=0.002 * u.electron / u.s,
+        bias=200.0 * u.adu,
+        full_well=50000.0 * u.electron,
+        binning=2,
+    )
+
+    assert detector.native_nx == 6244
+    assert detector.native_ny == 4168
+    assert detector.nx == 3122
+    assert detector.ny == 2084
+    assert_allclose(detector.native_pixel_size.to_value(u.um), 3.76)
+    assert_allclose(detector.pixel_size.to_value(u.um), 7.52)
+    assert_allclose(detector.native_read_noise.to_value(u.electron), 1.0)
+    assert_allclose(detector.read_noise.to_value(u.electron), 2.0)
+    assert_allclose(
+        detector.native_dark_current.to_value(u.electron / u.s),
+        0.002,
+    )
+    assert_allclose(detector.dark_current.to_value(u.electron / u.s), 0.008)
+    assert_allclose(detector.native_full_well.to_value(u.electron), 50000.0)
+    assert_allclose(detector.full_well.to_value(u.electron), 200000.0)
+    assert_allclose(detector.gain.to_value(u.electron / u.adu), 0.5)
+    assert_allclose(detector.bias.to_value(u.adu), 200.0)
+
+
+@pytest.mark.parametrize("binning", [0, -1, 1.5, True])
+def test_detector_rejects_invalid_binning(binning):
+    with pytest.raises(ValueError, match="positive integer"):
+        DetectorModel(
+            nx=6244,
+            ny=4168,
+            pixel_size=3.76 * u.um,
+            binning=binning,
+        )
+
+
+def test_detector_rejects_binning_that_does_not_divide_dimensions():
+    with pytest.raises(ValueError, match="evenly divide"):
+        DetectorModel(
+            nx=5,
+            ny=4,
+            pixel_size=3.76 * u.um,
+            binning=2,
+        )

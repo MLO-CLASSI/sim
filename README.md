@@ -27,6 +27,7 @@ from simulator import AtmosphericExtinction, InstrumentSimulator, SpectrographMo
 from simulator.components import (
     CANON_EF100_F2,
     CLASSI_FIBER,
+    DESI_SKY_DARK,
     CLAUD_50INCH,
     E02_PICKOFF,
     FGL400S,
@@ -52,6 +53,7 @@ sim = InstrumentSimulator(
     spectrograph=spectrograph,
     telescope=CLAUD_50INCH,
     atmosphere=AtmosphericExtinction(airmass=1.3),
+    sky=DESI_SKY_DARK,
 )
 ```
 
@@ -61,6 +63,11 @@ throughput curves directly from those components. `CLASSI_FIBER` carries the
 installed 10 m fiber length used for its attenuation curve. Additional passive
 optics such as the pickoff mirror and order-blocking filter are attached once
 through `optical_elements`.
+
+DESI dark, grey, and bright sky spectra are provided by `shared_data` and are
+treated as at-observatory surface brightnesses. The simulator scales them by
+the circular fiber sky area and applies downstream instrument throughput, but
+does not apply atmospheric extinction to them a second time.
 
 The existing numeric `SpectrographModel(...)` constructor remains available for
 custom geometries and backward compatibility.

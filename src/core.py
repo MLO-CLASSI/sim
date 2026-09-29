@@ -13,6 +13,7 @@ from .components import (
     FocalOptic,
     OpticalElement,
     GratingModel,
+    SkySpectrum,
     TelescopeModel,
     ThroughputCurve,
 )
@@ -296,6 +297,7 @@ class InstrumentSimulator:
         spectrograph: SpectrographModel,
         telescope: TelescopeModel = CLAUD_50INCH,
         atmosphere: AtmosphericExtinction | None = None,
+        sky: SkySpectrum | None = None,
         *,
         throughputs: list[ThroughputCurve] | None = None,
     ) -> None:
@@ -317,6 +319,7 @@ class InstrumentSimulator:
         self.detector = spectrograph.detector
         self.telescope = telescope
         self.atmosphere = atmosphere
+        self.sky = sky
 
         if throughputs is not None:
             if atmosphere is not None:
@@ -332,14 +335,34 @@ class InstrumentSimulator:
             self.throughputs.append(atmosphere)
         self.throughputs.extend(spectrograph.throughput_curves())
 
-    def combined_throughput(self, wavelength: u.Quantity) -> np.ndarray:
+    def combined_throughput(
+        self,
+        wavelength: u.Quantity,
+        *,
+        include_atmosphere: bool = True,
+    ) -> np.ndarray:
         wavelength = u.Quantity(wavelength)
         throughput = np.ones(wavelength.shape, dtype=float)
 
         for curve in self.throughputs:
+            if (
+                not include_atmosphere
+                and isinstance(curve, AtmosphericExtinction)
+            ):
+                continue
             throughput *= curve(wavelength)
 
         return throughput
+
+    @property
+    def fiber_sky_area(self) -> u.Quantity:
+        angular_radius = (
+            0.5
+            * self.spectrograph.fiber_core_diameter
+            / self.telescope.focal_length
+        ).decompose().value * u.rad
+        angular_radius = angular_radius.to(u.arcsec)
+        return np.pi * angular_radius**2
 
     def render_electrons(
         self,
@@ -456,7 +479,97 @@ class InstrumentSimulator:
                 radius_sigma=self.spectrograph.kernel_radius_sigma,
             )
 
+        if self.sky is not None:
+            image += self.render_sky_electrons(exposure)
+
         return self._apply_vignetting(image, vignetting)
+
+    def render_sky_electrons(self, exposure: u.Quantity) -> u.Quantity:
+        image = (
+            np.zeros((self.detector.ny, self.detector.nx), dtype=float)
+            * u.electron
+        )
+        if self.sky is None:
+            return image
+
+        exposure = u.Quantity(exposure).to(u.s)
+        wavelength, surface_brightness = self.sky.spectrum()
+        flux_density = (
+            surface_brightness * self.fiber_sky_area
+        ).to(FLUX_DENSITY_UNIT)
+
+        x_centers = self.spectrograph.wavelength_to_x(wavelength)
+        x_values = x_centers.to_value(u.pixel)
+        radius_x = int(
+            np.ceil(
+                self.spectrograph.kernel_radius_sigma
+                * self.spectrograph.spectral_sigma_px.to_value(u.pixel)
+            )
+        )
+        on_detector = (
+            (x_values >= -radius_x)
+            & (x_values <= self.detector.nx - 1 + radius_x)
+        )
+        wavelength = wavelength[on_detector]
+        flux_density = flux_density[on_detector]
+        x_values = x_values[on_detector]
+
+        if wavelength.size < 2:
+            return image
+
+        d_wavelength = self._trapezoid_bin_widths(wavelength)
+        photon_energy = (const.h * const.c / wavelength).to(u.erg)
+        throughput = self.combined_throughput(
+            wavelength,
+            include_atmosphere=False,
+        )
+        counts = (
+            flux_density
+            * self.telescope.collecting_area
+            * d_wavelength
+            * exposure
+            * throughput
+            / photon_energy
+        ).to_value(u.dimensionless_unscaled)
+        counts = np.clip(counts, 0, None)
+
+        # DESI sky spectra are sampled much more finely than the detector needs.
+        # Sum photon packets in detector-space bins so narrow lines retain their
+        # integrated flux while avoiding one Gaussian deposition per 0.1-A sample.
+        step = self.spectrograph.render_sampling_px
+        bin_index = np.floor(x_values / step).astype(np.int64)
+        _, inverse = np.unique(bin_index, return_inverse=True)
+        binned_counts = np.bincount(inverse, weights=counts)
+        weighted_x = np.bincount(inverse, weights=x_values * counts)
+        weighted_wavelength = np.bincount(
+            inverse,
+            weights=wavelength.to_value(u.AA) * counts,
+        )
+        positive = binned_counts > 0
+        binned_counts = binned_counts[positive]
+        binned_x = weighted_x[positive] / binned_counts
+        binned_wavelength = (
+            weighted_wavelength[positive] / binned_counts
+        ) * u.AA
+
+        for fiber_trace_y in self.spectrograph.fiber_trace_centers():
+            x = binned_x * u.pixel
+            y = self.spectrograph.wavelength_to_y(
+                binned_wavelength,
+                x,
+                fiber_trace_y,
+            )
+            self._deposit_gaussian_packets(
+                image=image,
+                x_centers=x,
+                y_centers=y,
+                counts=binned_counts * u.electron,
+                sigma_x=self.spectrograph.spectral_sigma_px,
+                sigma_y=self.spectrograph.spatial_sigma_px,
+                radius_sigma=self.spectrograph.kernel_radius_sigma,
+            )
+
+        return image
 
     def _resample_for_detector(
         self,

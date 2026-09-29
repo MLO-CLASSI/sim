@@ -18,6 +18,12 @@ from .optics import (
     OpticalElement,
     ThroughputCurve,
 )
+from .sky import (
+    DESI_SKY_BRIGHT,
+    DESI_SKY_DARK,
+    DESI_SKY_GREY,
+    SkySpectrum,
+)
 from .telescope import CLAUD_50INCH, CLAUD_50INCH, TelescopeModel
 
 __all__ = [
@@ -26,6 +32,9 @@ __all__ = [
     "CLASSI_FIBER",
     "CLAUD_50INCH",
     "CLAUD_50INCH",
+    "DESI_SKY_BRIGHT",
+    "DESI_SKY_DARK",
+    "DESI_SKY_GREY",
     "DetectorModel",
     "E02_PICKOFF",
     "FGL400S",
@@ -41,6 +50,7 @@ __all__ = [
     "QHY_268M",
     "THORLABS_AC508_180_AB",
     "THORLABS_GR50A_0305",
+    "SkySpectrum",
     "TelescopeModel",
     "ThroughputCurve",
     "UVFS_WINDOW",

@@ -12,18 +12,11 @@ class FiberModel:
     name: str
     attenuation_resource: str
     core_diameter: u.Quantity
+    length: u.Quantity
     numerical_aperture: float | None = None
 
-    def __post_init__(self) -> None:
-        if self.core_diameter is not None:
-            object.__setattr__(
-                self,
-                "core_diameter",
-                u.Quantity(self.core_diameter).to(u.um),
-            )
-
-    def throughput_curve(self, length: u.Quantity) -> ThroughputCurve:
-        length = u.Quantity(length).to(u.m)
+    def throughput_curve(self) -> ThroughputCurve:
+        length = self.length.to(u.m)
         if length < 0 * u.m:
             raise ValueError("Fiber length cannot be negative.")
 
@@ -39,6 +32,7 @@ UVNS = FiberModel(
     name="UV(NS) fiber",
     attenuation_resource="uvns_attenuation",
     core_diameter=105*u.um,
+    length=10*u.m,
     numerical_aperture=0.12,
 )
 
@@ -46,6 +40,7 @@ WF = FiberModel(
     name="WF fiber",
     attenuation_resource="wf_attenuation",
     core_diameter=100*u.um,
+    length=10*u.m,
     numerical_aperture=0.12,
 )
 
@@ -53,6 +48,7 @@ FG105LVA = FiberModel(
     name="FG105LVA fiber",
     attenuation_resource="hpsc25_attenuation",
     core_diameter=105*u.um,
+    length=10*u.m,
     numerical_aperture=0.10,
 )
 

@@ -2,8 +2,10 @@
 from dataclasses import dataclass, field
 
 import numpy as np
-import pandas as pd
 from astropy import units as u
+from shared_data import CSV_FILES
+
+from .optics import ThroughputCurve
 
 
 @dataclass
@@ -17,6 +19,9 @@ class DetectorModel:
     bias: u.Quantity = 0.0 * u.adu
     full_well: u.Quantity | None = None
     binning: int = 1
+    name: str = ""
+    qe_resource: str | None = None
+    window_resource: str | None = None
 
     native_nx: int = field(init=False)
     native_ny: int = field(init=False)
@@ -71,6 +76,26 @@ class DetectorModel:
             if self.native_full_well is not None:
                 self.full_well = self.native_full_well * bin_area
 
+    def qe_curve(self) -> ThroughputCurve:
+        if self.qe_resource is None:
+            raise ValueError(
+                f"No QE resource is configured for {self.name or 'this detector'}."
+            )
+        return ThroughputCurve.from_csv(
+            CSV_FILES[self.qe_resource],
+            name=f"{self.name} QE" if self.name else "detector QE",
+        )
+
+    def window_curve(self) -> ThroughputCurve:
+        if self.window_resource is None:
+            raise ValueError(
+                f"No window resource is configured for {self.name or 'this detector'}."
+            )
+        return ThroughputCurve.from_csv(
+            CSV_FILES[self.window_resource],
+            name=f"{self.name} window" if self.name else "detector window",
+        )
+
     def apply_noise(
         self,
         image_e: u.Quantity,
@@ -109,36 +134,44 @@ class DetectorModel:
 
         return (noisy_e / self.gain).to(u.adu) + self.bias
 
+
 FLI_KL400 = DetectorModel(
     nx=2048,
     ny=2048,
-    pixel_size=11*u.micron,
-    gain=0.478*u.electron/u.adu,
-    read_noise=1.6*u.electron,
-    dark_current=0.4*u.electron/u.s,
-    bias=200.0*u.adu,
-    full_well=90000.0*u.electron,
+    pixel_size=11 * u.micron,
+    gain=0.478 * u.electron / u.adu,
+    read_noise=1.6 * u.electron,
+    dark_current=0.4 * u.electron / u.s,
+    bias=200.0 * u.adu,
+    full_well=90000.0 * u.electron,
+    name="FLI Kepler KL400",
+    qe_resource="gsense400bsi_qe",
 )
 
 FLI_AR571 = DetectorModel(
     nx=6244,
     ny=4168,
-    pixel_size=3.76*u.um,
+    pixel_size=3.76 * u.um,
     # gain=?,
-    read_noise=1.0*u.electron,
-    dark_current=0.002*u.electron/u.s,
-    bias=200*u.adu,
-    full_well=50000.0*u.electron,
+    read_noise=1.0 * u.electron,
+    dark_current=0.002 * u.electron / u.s,
+    bias=200 * u.adu,
+    full_well=50000.0 * u.electron,
     binning=2,
+    name="FLI Aurora AR571",
+    qe_resource="AR571_qe",
+    window_resource="UVFS_coating",
 )
 
 QHY_268M = DetectorModel(
     nx=6280,
     ny=4210,
-    pixel_size=3.76*u.micron,
-    gain=0.52*u.electron/u.adu,
-    read_noise=2.18*u.electron,
-    dark_current=0.0005*u.electron/u.s,
+    pixel_size=3.76 * u.micron,
+    gain=0.52 * u.electron / u.adu,
+    read_noise=2.18 * u.electron,
+    dark_current=0.0005 * u.electron / u.s,
     # bias=?,
-    full_well=43977*u.electron,
+    full_well=43977 * u.electron,
+    name="QHY268M",
+    qe_resource="qhy268_qe",
 )

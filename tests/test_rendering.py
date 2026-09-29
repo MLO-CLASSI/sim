@@ -4,7 +4,8 @@ from astropy import units as u
 from numpy.testing import assert_allclose
 
 from simulator import DetectorModel, InstrumentSimulator, SpectrographModel, ThroughputCurve
-from simulator.core import FLUX_DENSITY_UNIT, TELESCOPE_AREA, f_lambda_to_photon_flux_density
+from simulator.core import FLUX_DENSITY_UNIT, f_lambda_to_photon_flux_density
+from simulator.components import CLAUD_50INCH
 
 
 def test_trapezoid_bin_widths_preserve_total_span():
@@ -93,7 +94,7 @@ def test_rendered_total_matches_integrated_photon_count(small_spectrograph):
     image = simulator.render_electrons(wavelength, flux, exposure)
 
     widths = simulator._trapezoid_bin_widths(wavelength)
-    photon_rate_density = f_lambda_to_photon_flux_density(wavelength, flux, TELESCOPE_AREA)
+    photon_rate_density = f_lambda_to_photon_flux_density(wavelength, flux, CLAUD_50INCH.collecting_area)
     expected = np.sum(
         photon_rate_density
         * widths

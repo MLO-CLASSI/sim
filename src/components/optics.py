@@ -13,12 +13,8 @@ class ThroughputCurve:
     fill_value: float = 0.0
 
     def __post_init__(self) -> None:
-        self.wavelength = u.Quantity(self.wavelength)
-        if self.wavelength.unit == u.dimensionless_unscaled:
-            raise u.UnitConversionError("Throughput wavelength values must have units.")
-
-        throughput = u.Quantity(self.throughput)
-        self.throughput = throughput.to_value(u.dimensionless_unscaled)
+        self.wavelength = u.Quantity(self.wavelength).to(u.AA)
+        self.throughput = u.Quantity(self.throughput).to_value(u.dimensionless_unscaled)
         if self.wavelength.shape != self.throughput.shape:
             raise ValueError("wavelength and throughput must have the same shape.")
 
@@ -47,3 +43,55 @@ class ThroughputCurve:
             fill_value,
         )
 
+
+@dataclass
+class OpticalElement:
+    name: str
+    throughput_resource: str
+
+    def throughput_curve(self) -> ThroughputCurve:
+        return ThroughputCurve.from_csv(
+            CSV_FILES[self.throughput_resource],
+            name=self.name,
+        )
+
+
+@dataclass
+class FocalOptic(OpticalElement):
+    focal_length: u.Quantity
+    throughput_source_note: str = ""
+
+    def __post_init__(self) -> None:
+        self.focal_length = u.Quantity(self.focal_length).to(u.mm)
+
+
+E02_PICKOFF = OpticalElement(
+    name="E02 pickoff mirror",
+    throughput_resource="e02_mirror_coating",
+)
+
+FGL400S = OpticalElement(
+    name="Thorlabs FGL400S long-pass filter",
+    throughput_resource="FGL400S_transmission",
+)
+
+UVFS_WINDOW = OpticalElement(
+    name="UV fused-silica detector window",
+    throughput_resource="UVFS_coating",
+)
+
+THORLABS_AC508_180_AB = FocalOptic(
+    name="Thorlabs AC508-180-AB",
+    focal_length=180 * u.mm,
+    throughput_resource="ac508-180-ab",
+)
+
+CANON_EF100_F2 = FocalOptic(
+    name="Canon EF 100 mm f/2 USM",
+    focal_length=100 * u.mm,
+    throughput_resource="LensTip_CanonEF85mm",
+    throughput_source_note=(
+        "Transmission curve is currently represented by the available "
+        "LensTip Canon EF 85 mm data as a proxy."
+    ),
+)

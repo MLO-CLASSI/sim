@@ -3,31 +3,20 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
-import pandas as pd
 from astropy import constants as const, units as u
-from shared_data import CSV_FILES
-from .components import DetectorModel, ThroughputCurve
 
-TELESCOPE_DIAMETER = 1.25 * u.m
-OBSTRUCTION_DIAMETER = 0.30 * TELESCOPE_DIAMETER
-TELESCOPE_AREA = np.pi * (TELESCOPE_DIAMETER**2 - OBSTRUCTION_DIAMETER**2) / 4
+from .components import (
+    AtmosphericExtinction,
+    CLAUD_50INCH,
+    DetectorModel,
+    FiberModel,
+    FocalOptic,
+    GratingModel,
+    TelescopeModel,
+    ThroughputCurve,
+)
+
 FLUX_DENSITY_UNIT = u.erg / u.s / u.cm**2 / u.AA
-
-PALOMAR_EXTINCTION = pd.read_csv(CSV_FILES["palomar_atm_ext_per_airmass"],
-                                 header=None, names=["wav", "ext"])
-
-
-class AtmosphericExtinction(ThroughputCurve):
-
-    def __init__(
-        self,
-        airmass: float = 1.0,
-        name: str = "atmosphere",
-        fill_value: float = 0.0,
-    ):
-        throughput = 10 ** (-0.4 * PALOMAR_EXTINCTION["ext"].values * airmass)
-        wavelength = PALOMAR_EXTINCTION["wav"].values * u.nm
-        super().__init__(wavelength, throughput, name=name, fill_value=fill_value)
 
 
 @dataclass
@@ -47,6 +36,56 @@ class SpectrographModel:
     render_sampling_px: float = 0.5
 
     trace_func: Callable[[u.Quantity, u.Quantity], u.Quantity] | None = None
+
+    grating: GratingModel | None = None
+    collimator: FocalOptic | None = None
+    camera_lens: FocalOptic | None = None
+    fiber: FiberModel | None = None
+
+    @classmethod
+    def from_components(
+        cls,
+        *,
+        detector: DetectorModel,
+        grating: GratingModel,
+        collimator: FocalOptic,
+        camera_lens: FocalOptic,
+        fiber: FiberModel,
+        incidence_angle: u.Quantity,
+        diffraction_angle: u.Quantity,
+        diffraction_order: int = 1,
+        fiber_count: int = 1,
+        fiber_pitch: u.Quantity = 250.0 * u.um,
+        wavelength_increases_with_x: bool = False,
+        kernel_radius_sigma: float = 4.0,
+        render_sampling_px: float = 0.5,
+        trace_func: Callable[[u.Quantity, u.Quantity], u.Quantity] | None = None,
+    ) -> "SpectrographModel":
+        if fiber.core_diameter is None:
+            raise ValueError(
+                "fiber.core_diameter must be defined to construct a spectrograph."
+            )
+
+        return cls(
+            detector=detector,
+            groove_density=grating.groove_density,
+            incidence_angle=incidence_angle,
+            diffraction_angle=diffraction_angle,
+            collimator_focal_length=collimator.focal_length,
+            camera_focal_length=camera_lens.focal_length,
+            fiber_core_diameter=fiber.core_diameter,
+            diffraction_order=diffraction_order,
+            fiber_count=fiber_count,
+            fiber_pitch=fiber_pitch,
+            wavelength_increases_with_x=wavelength_increases_with_x,
+            kernel_radius_sigma=kernel_radius_sigma,
+            render_sampling_px=render_sampling_px,
+            trace_func=trace_func,
+            grating=grating,
+            collimator=collimator,
+            camera_lens=camera_lens,
+            fiber=fiber,
+        )
 
     def __post_init__(self) -> None:
         self.groove_density = u.Quantity(self.groove_density).to(1 / u.mm)
@@ -220,15 +259,11 @@ class SpectrographModel:
         ).to(u.pixel)
 
 
+@dataclass
 class InstrumentSimulator:
-    def __init__(
-        self,
-        spectrograph: SpectrographModel,
-        throughputs: list[ThroughputCurve],
-    ) -> None:
-        self.spectrograph = spectrograph
-        self.detector = spectrograph.detector
-        self.throughputs = throughputs
+    spectrograph: SpectrographModel
+    throughputs: list[ThroughputCurve]
+    telescope: TelescopeModel = CLAUD_50INCH
 
     def combined_throughput(self, wavelength: u.Quantity) -> np.ndarray:
         wavelength = u.Quantity(wavelength)
@@ -295,7 +330,7 @@ class InstrumentSimulator:
 
         expected_electrons = (
             flux_density
-            * TELESCOPE_AREA
+            * self.telescope.collecting_area
             * d_wavelength
             * exposure
             * throughput

@@ -4,7 +4,7 @@ from astropy import units as u
 from numpy.testing import assert_allclose
 
 from simulator import AtmosphericExtinction, InstrumentSimulator, ThroughputCurve, f_lambda_to_photon_flux_density
-from simulator.core import TELESCOPE_AREA
+from simulator.components import CLAUD_50INCH
 
 
 def test_throughput_curve_interpolates_across_compatible_units():
@@ -56,7 +56,7 @@ def test_combined_throughput_multiplies_components(small_spectrograph):
 
 
 def test_telescope_collecting_area_includes_central_obstruction():
-    assert_allclose(TELESCOPE_AREA.to_value(u.m**2), 1.1167380135807468, rtol=1e-14)
+    assert_allclose(CLAUD_50INCH.collecting_area.to_value(u.m**2), 1.1167380135807468, rtol=1e-14)
 
 
 def test_atmospheric_extinction_decreases_with_airmass():

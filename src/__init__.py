@@ -2,6 +2,7 @@
 
 from .components import (
     AtmosphericExtinction,
+    CLAUD_50INCH,
     DetectorModel,
     FiberModel,
     FocalOptic,
@@ -19,6 +20,7 @@ from .utils import read_snifs_spectrum
 
 __all__ = [
     "AtmosphericExtinction",
+    "CLAUD_50INCH",
     "DetectorModel",
     "FiberModel",
     "FocalOptic",

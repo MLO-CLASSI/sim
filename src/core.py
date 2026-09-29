@@ -11,6 +11,7 @@ from .components import (
     DetectorModel,
     FiberModel,
     FocalOptic,
+    OpticalElement,
     GratingModel,
     TelescopeModel,
     ThroughputCurve,
@@ -41,6 +42,8 @@ class SpectrographModel:
     collimator: FocalOptic | None = None
     camera_lens: FocalOptic | None = None
     fiber: FiberModel | None = None
+    optical_elements: tuple[OpticalElement, ...] = ()
+    extra_throughputs: tuple[ThroughputCurve, ...] = ()
 
     @classmethod
     def from_components(
@@ -60,6 +63,8 @@ class SpectrographModel:
         kernel_radius_sigma: float = 4.0,
         render_sampling_px: float = 0.5,
         trace_func: Callable[[u.Quantity, u.Quantity], u.Quantity] | None = None,
+        optical_elements: tuple[OpticalElement, ...] = (),
+        extra_throughputs: tuple[ThroughputCurve, ...] = (),
     ) -> "SpectrographModel":
         if fiber.core_diameter is None:
             raise ValueError(
@@ -85,6 +90,8 @@ class SpectrographModel:
             collimator=collimator,
             camera_lens=camera_lens,
             fiber=fiber,
+            optical_elements=optical_elements,
+            extra_throughputs=extra_throughputs,
         )
 
     def __post_init__(self) -> None:
@@ -97,6 +104,8 @@ class SpectrographModel:
         self.camera_focal_length = u.Quantity(self.camera_focal_length).to(u.mm)
         self.fiber_core_diameter = u.Quantity(self.fiber_core_diameter).to(u.um)
         self.fiber_pitch = u.Quantity(self.fiber_pitch).to(u.um)
+        self.optical_elements = tuple(self.optical_elements)
+        self.extra_throughputs = tuple(self.extra_throughputs)
 
         if self.diffraction_order == 0:
             raise ValueError("diffraction_order must be non-zero.")
@@ -104,6 +113,28 @@ class SpectrographModel:
             raise ValueError("fiber_count must be at least 1.")
         if self.render_sampling_px <= 0:
             raise ValueError("render_sampling_px must be positive.")
+
+    def throughput_curves(self) -> list[ThroughputCurve]:
+        curves = [
+            element.throughput_curve()
+            for element in self.optical_elements
+        ]
+
+        if self.fiber is not None:
+            curves.append(self.fiber.throughput_curve())
+        if self.collimator is not None:
+            curves.append(self.collimator.throughput_curve())
+        if self.grating is not None:
+            curves.append(self.grating.throughput_curve())
+        if self.camera_lens is not None:
+            curves.append(self.camera_lens.throughput_curve())
+        if self.detector.window_resource is not None:
+            curves.append(self.detector.window_curve())
+        if self.detector.qe_resource is not None:
+            curves.append(self.detector.qe_curve())
+
+        curves.extend(self.extra_throughputs)
+        return curves
 
     @property
     def groove_spacing(self) -> u.Quantity:
@@ -259,11 +290,47 @@ class SpectrographModel:
         ).to(u.pixel)
 
 
-@dataclass
 class InstrumentSimulator:
-    spectrograph: SpectrographModel
-    throughputs: list[ThroughputCurve]
-    telescope: TelescopeModel = CLAUD_50INCH
+    def __init__(
+        self,
+        spectrograph: SpectrographModel,
+        telescope: TelescopeModel = CLAUD_50INCH,
+        atmosphere: AtmosphericExtinction | None = None,
+        *,
+        throughputs: list[ThroughputCurve] | None = None,
+    ) -> None:
+        # Accept the previous InstrumentSimulator(spectrograph, throughputs)
+        # form so downstream callers can migrate independently.
+        if isinstance(telescope, list):
+            if atmosphere is not None or throughputs is not None:
+                raise TypeError(
+                    "Legacy positional throughputs cannot be combined with "
+                    "atmosphere or throughputs=."
+                )
+            throughputs = telescope
+            telescope = CLAUD_50INCH
+
+        if not isinstance(telescope, TelescopeModel):
+            raise TypeError("telescope must be a TelescopeModel.")
+
+        self.spectrograph = spectrograph
+        self.detector = spectrograph.detector
+        self.telescope = telescope
+        self.atmosphere = atmosphere
+
+        if throughputs is not None:
+            if atmosphere is not None:
+                raise ValueError(
+                    "atmosphere cannot be combined with an explicit "
+                    "throughputs override."
+                )
+            self.throughputs = list(throughputs)
+            return
+
+        self.throughputs = []
+        if atmosphere is not None:
+            self.throughputs.append(atmosphere)
+        self.throughputs.extend(spectrograph.throughput_curves())
 
     def combined_throughput(self, wavelength: u.Quantity) -> np.ndarray:
         wavelength = u.Quantity(wavelength)

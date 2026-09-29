@@ -18,12 +18,13 @@ from .optics import (
     OpticalElement,
     ThroughputCurve,
 )
-from .telescope import CLAUD_50INCH, TelescopeModel
+from .telescope import CLAUD_50INCH, CLAUD_50INCH, TelescopeModel
 
 __all__ = [
     "AtmosphericExtinction",
     "CANON_EF100_F2",
     "CLASSI_FIBER",
+    "CLAUD_50INCH",
     "CLAUD_50INCH",
     "DetectorModel",
     "E02_PICKOFF",

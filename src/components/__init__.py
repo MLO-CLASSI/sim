@@ -1,7 +1,7 @@
 
 from .atmosphere import AtmosphericExtinction
 from .cameras import DetectorModel, FLI_AR571, FLI_KL400, QHY_268M
-from .fibers import CLASSI_FIBER, HPSC25, UVNS, UVWFS, WF, WFNS, FiberModel
+from .fibers import CLASSI_FIBER, FG105LVA, UVNS, UVWFS, WF, WFNS, FiberModel
 from .gratings import (
     NEWPORT_MASTER_1229,
     NEWPORT_MASTER_1294,
@@ -34,7 +34,7 @@ __all__ = [
     "FiberModel",
     "FocalOptic",
     "GratingModel",
-    "HPSC25",
+    "FG105LVA",
     "NEWPORT_MASTER_1229",
     "NEWPORT_MASTER_1294",
     "OpticalElement",

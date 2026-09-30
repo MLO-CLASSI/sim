@@ -1,6 +1,6 @@
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from astropy import constants as const, units as u
@@ -9,6 +9,7 @@ from .components import (
     AtmosphericExtinction,
     CLAUD_50INCH,
     DetectorModel,
+    DetectorReadout,
     FiberModel,
     FocalOptic,
     OpticalElement,
@@ -23,7 +24,7 @@ FLUX_DENSITY_UNIT = u.erg / u.s / u.cm**2 / u.AA
 
 @dataclass
 class SpectrographModel:
-    detector: DetectorModel
+    detector: DetectorModel | DetectorReadout
     groove_density: u.Quantity
     incidence_angle: u.Quantity
     diffraction_angle: u.Quantity
@@ -299,6 +300,7 @@ class InstrumentSimulator:
         atmosphere: AtmosphericExtinction | None = None,
         sky: SkySpectrum | None = None,
         *,
+        binning: int = 1,
         throughputs: list[ThroughputCurve] | None = None,
     ) -> None:
         # Accept the previous InstrumentSimulator(spectrograph, throughputs)
@@ -314,9 +316,20 @@ class InstrumentSimulator:
 
         if not isinstance(telescope, TelescopeModel):
             raise TypeError("telescope must be a TelescopeModel.")
+        if isinstance(spectrograph.detector, DetectorReadout):
+            raise TypeError(
+                "spectrograph.detector must describe the native detector; "
+                "set binning on InstrumentSimulator instead."
+            )
 
         self.spectrograph = spectrograph
         self.detector = spectrograph.detector
+        self.readout = DetectorReadout(self.detector, binning=binning)
+        self.binning = self.readout.binning
+        self.readout_spectrograph = replace(
+            spectrograph,
+            detector=self.readout,
+        )
         self.telescope = telescope
         self.atmosphere = atmosphere
         self.sky = sky
@@ -365,6 +378,23 @@ class InstrumentSimulator:
         return np.pi * angular_radius**2
 
     def render_electrons(
+        self,
+        wavelength: u.Quantity,
+        flux_density: u.Quantity,
+        exposure: u.Quantity,
+        vignetting=None,
+        fiber_coupling_efficiency=1.0,
+    ) -> u.Quantity:
+        native_image = self._render_native_electrons(
+            wavelength=wavelength,
+            flux_density=flux_density,
+            exposure=exposure,
+            vignetting=vignetting,
+            fiber_coupling_efficiency=fiber_coupling_efficiency,
+        )
+        return self.readout.bin_electrons(native_image)
+
+    def _render_native_electrons(
         self,
         wavelength: u.Quantity,
         flux_density: u.Quantity,
@@ -457,7 +487,10 @@ class InstrumentSimulator:
             )
 
         x_centers = self.spectrograph.wavelength_to_x(wavelength)
-        image = np.zeros((self.detector.ny, self.detector.nx), dtype=float) * u.electron
+        image = (
+            np.zeros((self.detector.ny, self.detector.nx), dtype=float)
+            * u.electron
+        )
 
         for fiber_trace_y, fiber_bin_electrons in zip(
             self.spectrograph.fiber_trace_centers(),
@@ -480,11 +513,19 @@ class InstrumentSimulator:
             )
 
         if self.sky is not None:
-            image += self.render_sky_electrons(exposure)
+            image += self._render_native_sky_electrons(exposure)
 
         return self._apply_vignetting(image, vignetting)
 
     def render_sky_electrons(self, exposure: u.Quantity) -> u.Quantity:
+        return self.readout.bin_electrons(
+            self._render_native_sky_electrons(exposure)
+        )
+
+    def _render_native_sky_electrons(
+        self,
+        exposure: u.Quantity,
+    ) -> u.Quantity:
         image = (
             np.zeros((self.detector.ny, self.detector.nx), dtype=float)
             * u.electron
@@ -646,7 +687,7 @@ class InstrumentSimulator:
         seed: int = None,
         fiber_coupling_efficiency=1.0,
     ) -> u.Quantity:
-        image_e = self.render_electrons(
+        native_image_e = self._render_native_electrons(
             wavelength=wavelength,
             flux_density=flux_density,
             exposure=exposure,
@@ -655,11 +696,11 @@ class InstrumentSimulator:
         )
 
         if not add_noise:
-            return image_e
+            return self.readout.bin_electrons(native_image_e)
 
         rng = np.random.default_rng(seed)
-        return self.detector.apply_noise(
-            image_e=image_e,
+        return self.readout.apply_noise(
+            image_e=native_image_e,
             exposure=exposure,
             rng=rng,
         )
@@ -730,7 +771,6 @@ class InstrumentSimulator:
             raise ValueError("vignetting must have the same shape as the detector image.")
 
         return image * np.clip(factor, 0, None)
-
 
 def f_lambda_to_photon_flux_density(
     wavelength: u.Quantity,

@@ -1,5 +1,5 @@
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from astropy import units as u
@@ -18,17 +18,9 @@ class DetectorModel:
     dark_current: u.Quantity = 0.0 * u.electron / u.s
     bias: u.Quantity = 0.0 * u.adu
     full_well: u.Quantity | None = None
-    binning: int = 1
     name: str = ""
     qe_resource: str | None = None
     window_resource: str | None = None
-
-    native_nx: int = field(init=False)
-    native_ny: int = field(init=False)
-    native_pixel_size: u.Quantity = field(init=False, repr=False)
-    native_read_noise: u.Quantity = field(init=False, repr=False)
-    native_dark_current: u.Quantity = field(init=False, repr=False)
-    native_full_well: u.Quantity | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.pixel_size = u.Quantity(self.pixel_size).to(u.um)
@@ -38,43 +30,6 @@ class DetectorModel:
         self.bias = u.Quantity(self.bias).to(u.adu)
         if self.full_well is not None:
             self.full_well = u.Quantity(self.full_well).to(u.electron)
-
-        if (
-            isinstance(self.binning, bool)
-            or not isinstance(self.binning, (int, np.integer))
-            or self.binning < 1
-        ):
-            raise ValueError("binning must be a positive integer.")
-        self.binning = int(self.binning)
-
-        if self.nx % self.binning != 0 or self.ny % self.binning != 0:
-            raise ValueError(
-                "binning must evenly divide both detector dimensions."
-            )
-
-        self.native_nx = self.nx
-        self.native_ny = self.ny
-        self.native_pixel_size = self.pixel_size.copy()
-        self.native_read_noise = self.read_noise.copy()
-        self.native_dark_current = self.dark_current.copy()
-        self.native_full_well = (
-            None if self.full_well is None else self.full_well.copy()
-        )
-
-        if self.binning > 1:
-            bin_area = self.binning**2
-            self.nx //= self.binning
-            self.ny //= self.binning
-            self.pixel_size = self.native_pixel_size * self.binning
-
-            # Model square CMOS binning as the sum of independent native
-            # pixels. Area-dependent charge terms scale with the number of
-            # native pixels, while independent read-noise terms add in
-            # quadrature. Gain and the output bias pedestal are left unchanged.
-            self.dark_current = self.native_dark_current * bin_area
-            self.read_noise = self.native_read_noise * np.sqrt(bin_area)
-            if self.native_full_well is not None:
-                self.full_well = self.native_full_well * bin_area
 
     def qe_curve(self) -> ThroughputCurve:
         if self.qe_resource is None:
@@ -96,7 +51,7 @@ class DetectorModel:
             name=f"{self.name} window" if self.name else "detector window",
         )
 
-    def apply_noise(
+    def apply_noise_electrons(
         self,
         image_e: u.Quantity,
         exposure: u.Quantity,
@@ -109,9 +64,7 @@ class DetectorModel:
         expected_values = np.clip(expected_e.to_value(u.electron), 0, None)
         noisy_e = rng.poisson(expected_values).astype(float) * u.electron
 
-        # Full well limits the accumulated charge before the detector is read.
-        # Read noise is introduced afterward and therefore should not itself be
-        # clipped by the physical full-well capacity.
+        # Saturation occurs in each physical pixel before the detector is read.
         if self.full_well is not None:
             noisy_e = (
                 np.clip(
@@ -132,7 +85,117 @@ class DetectorModel:
                 * u.electron
             )
 
-        return (noisy_e / self.gain).to(u.adu) + self.bias
+        return noisy_e
+
+    def to_adu(self, image_e: u.Quantity) -> u.Quantity:
+        image_e = u.Quantity(image_e).to(u.electron)
+        return (image_e / self.gain).to(u.adu) + self.bias
+
+    def apply_noise(
+        self,
+        image_e: u.Quantity,
+        exposure: u.Quantity,
+        rng: np.random.Generator,
+    ) -> u.Quantity:
+        noisy_e = self.apply_noise_electrons(image_e, exposure, rng)
+        return self.to_adu(noisy_e)
+
+
+@dataclass(frozen=True)
+class DetectorReadout:
+    detector: DetectorModel
+    binning: int = 1
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.binning, bool)
+            or not isinstance(self.binning, (int, np.integer))
+            or self.binning < 1
+        ):
+            raise ValueError("binning must be a positive integer.")
+
+        binning = int(self.binning)
+        if self.detector.nx % binning != 0 or self.detector.ny % binning != 0:
+            raise ValueError(
+                "binning must evenly divide both detector dimensions."
+            )
+        object.__setattr__(self, "binning", binning)
+
+    @property
+    def nx(self) -> int:
+        return self.detector.nx // self.binning
+
+    @property
+    def ny(self) -> int:
+        return self.detector.ny // self.binning
+
+    @property
+    def pixel_size(self) -> u.Quantity:
+        return self.detector.pixel_size * self.binning
+
+    @property
+    def read_noise(self) -> u.Quantity:
+        return self.detector.read_noise * self.binning
+
+    @property
+    def dark_current(self) -> u.Quantity:
+        return self.detector.dark_current * self.binning**2
+
+    @property
+    def gain(self) -> u.Quantity:
+        return self.detector.gain
+
+    @property
+    def bias(self) -> u.Quantity:
+        return self.detector.bias
+
+    @property
+    def qe_resource(self) -> str | None:
+        return self.detector.qe_resource
+
+    @property
+    def window_resource(self) -> str | None:
+        return self.detector.window_resource
+
+    def qe_curve(self) -> ThroughputCurve:
+        return self.detector.qe_curve()
+
+    def window_curve(self) -> ThroughputCurve:
+        return self.detector.window_curve()
+
+    def bin_electrons(self, image_e: u.Quantity) -> u.Quantity:
+        image_e = u.Quantity(image_e).to(u.electron)
+        expected_shape = (self.detector.ny, self.detector.nx)
+        if image_e.shape != expected_shape:
+            raise ValueError(
+                "image_e must have the native detector shape "
+                f"{expected_shape}; got {image_e.shape}."
+            )
+
+        if self.binning == 1:
+            return image_e
+
+        values = image_e.to_value(u.electron).reshape(
+            self.ny,
+            self.binning,
+            self.nx,
+            self.binning,
+        )
+        return values.sum(axis=(1, 3)) * u.electron
+
+    def apply_noise(
+        self,
+        image_e: u.Quantity,
+        exposure: u.Quantity,
+        rng: np.random.Generator,
+    ) -> u.Quantity:
+        noisy_native_e = self.detector.apply_noise_electrons(
+            image_e,
+            exposure,
+            rng,
+        )
+        binned_e = self.bin_electrons(noisy_native_e)
+        return self.detector.to_adu(binned_e)
 
 
 FLI_KL400 = DetectorModel(
@@ -157,7 +220,6 @@ FLI_AR571 = DetectorModel(
     dark_current=0.002 * u.electron / u.s,
     bias=200 * u.adu,
     full_well=50000.0 * u.electron,
-    binning=2,
     name="FLI Aurora AR571",
     qe_resource="AR571_qe",
     window_resource="UVFS_coating",

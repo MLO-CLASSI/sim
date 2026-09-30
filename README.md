@@ -54,6 +54,7 @@ sim = InstrumentSimulator(
     telescope=CLAUD_50INCH,
     atmosphere=AtmosphericExtinction(airmass=1.3),
     sky=DESI_SKY_DARK,
+    binning=2,
 )
 ```
 
@@ -68,6 +69,14 @@ DESI dark, grey, and bright sky spectra are provided by `shared_data` and are
 treated as at-observatory surface brightnesses. The simulator scales them by
 the circular fiber sky area and applies downstream instrument throughput, but
 does not apply atmospheric extinction to them a second time.
+
+Detector definitions describe the native physical sensor. Readout binning is
+selected per simulator instance with `binning=1`, `2`, `4`, etc. The optical
+signal, dark current, saturation, and read noise are evaluated on the native
+pixels before square bins are summed. Gain and the output bias are then applied
+to the binned image. `sim.readout` describes the output detector grid, and
+`sim.readout_spectrograph` provides wavelength/pixel geometry in that binned
+coordinate system.
 
 The existing numeric `SpectrographModel(...)` constructor remains available for
 custom geometries and backward compatibility.

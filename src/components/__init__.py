@@ -1,6 +1,6 @@
 
 from .atmosphere import AtmosphericExtinction
-from .cameras import DetectorModel, FLI_AR571, FLI_KL400, QHY_268M
+from .cameras import DetectorModel, DetectorReadout, FLI_AR571, FLI_KL400, QHY_268M
 from .fibers import CLASSI_FIBER, FG105LVA, UVNS, WF, FiberModel
 from .gratings import (
     NEWPORT_MASTER_1229,
@@ -36,6 +36,7 @@ __all__ = [
     "DESI_SKY_DARK",
     "DESI_SKY_GREY",
     "DetectorModel",
+    "DetectorReadout",
     "E02_PICKOFF",
     "FGL400S",
     "FLI_AR571",

@@ -11,7 +11,6 @@ def imx571_detector():
         nx=6244,
         ny=4168,
         pixel_size=3.76 * u.um,
-        binning=2,
     )
 
 

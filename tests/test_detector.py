@@ -3,7 +3,7 @@ import pytest
 from astropy import units as u
 from numpy.testing import assert_allclose
 
-from simulator import DetectorModel
+from simulator import DetectorModel, DetectorReadout
 
 
 class DeterministicRNG:
@@ -73,7 +73,7 @@ def test_detector_noise_is_reproducible_for_fixed_seed():
     assert_allclose(first.value, second.value, rtol=0, atol=0)
 
 
-def test_detector_binning_scales_geometry_and_noise():
+def test_readout_scales_output_geometry_and_effective_noise():
     detector = DetectorModel(
         nx=6244,
         ny=4168,
@@ -83,44 +83,72 @@ def test_detector_binning_scales_geometry_and_noise():
         dark_current=0.002 * u.electron / u.s,
         bias=200.0 * u.adu,
         full_well=50000.0 * u.electron,
-        binning=2,
     )
+    readout = DetectorReadout(detector, binning=2)
 
-    assert detector.native_nx == 6244
-    assert detector.native_ny == 4168
-    assert detector.nx == 3122
-    assert detector.ny == 2084
-    assert_allclose(detector.native_pixel_size.to_value(u.um), 3.76)
-    assert_allclose(detector.pixel_size.to_value(u.um), 7.52)
-    assert_allclose(detector.native_read_noise.to_value(u.electron), 1.0)
-    assert_allclose(detector.read_noise.to_value(u.electron), 2.0)
-    assert_allclose(
-        detector.native_dark_current.to_value(u.electron / u.s),
-        0.002,
+    assert detector.nx == 6244
+    assert detector.ny == 4168
+    assert_allclose(detector.pixel_size.to_value(u.um), 3.76)
+    assert_allclose(detector.read_noise.to_value(u.electron), 1.0)
+    assert_allclose(detector.dark_current.to_value(u.electron / u.s), 0.002)
+    assert_allclose(detector.full_well.to_value(u.electron), 50000.0)
+
+    assert readout.nx == 3122
+    assert readout.ny == 2084
+    assert_allclose(readout.pixel_size.to_value(u.um), 7.52)
+    assert_allclose(readout.read_noise.to_value(u.electron), 2.0)
+    assert_allclose(readout.dark_current.to_value(u.electron / u.s), 0.008)
+    assert_allclose(readout.gain.to_value(u.electron / u.adu), 0.5)
+    assert_allclose(readout.bias.to_value(u.adu), 200.0)
+
+
+def test_readout_sums_native_pixels_before_gain_and_bias():
+    detector = DetectorModel(
+        nx=2,
+        ny=2,
+        pixel_size=3.76 * u.um,
+        gain=2.0 * u.electron / u.adu,
+        read_noise=0.0 * u.electron,
+        dark_current=0.0 * u.electron / u.s,
+        bias=100.0 * u.adu,
     )
-    assert_allclose(detector.dark_current.to_value(u.electron / u.s), 0.008)
-    assert_allclose(detector.native_full_well.to_value(u.electron), 50000.0)
-    assert_allclose(detector.full_well.to_value(u.electron), 200000.0)
-    assert_allclose(detector.gain.to_value(u.electron / u.adu), 0.5)
-    assert_allclose(detector.bias.to_value(u.adu), 200.0)
+    readout = DetectorReadout(detector, binning=2)
+    image = np.array([[2.0, 4.0], [6.0, 8.0]]) * u.electron
+
+    result = readout.apply_noise(image, 1 * u.s, DeterministicRNG())
+
+    assert_allclose(result.to_value(u.adu), [[110.0]])
+
+
+def test_native_pixel_saturation_occurs_before_binning():
+    detector = DetectorModel(
+        nx=2,
+        ny=2,
+        pixel_size=3.76 * u.um,
+        gain=1.0 * u.electron / u.adu,
+        read_noise=0.0 * u.electron,
+        dark_current=0.0 * u.electron / u.s,
+        bias=0.0 * u.adu,
+        full_well=25.0 * u.electron,
+    )
+    readout = DetectorReadout(detector, binning=2)
+    image = np.array([[30.0, 0.0], [0.0, 0.0]]) * u.electron
+
+    result = readout.apply_noise(image, 1 * u.s, DeterministicRNG())
+
+    assert_allclose(result.to_value(u.adu), [[25.0]])
 
 
 @pytest.mark.parametrize("binning", [0, -1, 1.5, True])
-def test_detector_rejects_invalid_binning(binning):
+def test_readout_rejects_invalid_binning(binning):
+    detector = DetectorModel(nx=8, ny=8, pixel_size=3.76 * u.um)
+
     with pytest.raises(ValueError, match="positive integer"):
-        DetectorModel(
-            nx=6244,
-            ny=4168,
-            pixel_size=3.76 * u.um,
-            binning=binning,
-        )
+        DetectorReadout(detector, binning=binning)
 
 
-def test_detector_rejects_binning_that_does_not_divide_dimensions():
+def test_readout_rejects_binning_that_does_not_divide_dimensions():
+    detector = DetectorModel(nx=5, ny=4, pixel_size=3.76 * u.um)
+
     with pytest.raises(ValueError, match="evenly divide"):
-        DetectorModel(
-            nx=5,
-            ny=4,
-            pixel_size=3.76 * u.um,
-            binning=2,
-        )
+        DetectorReadout(detector, binning=2)

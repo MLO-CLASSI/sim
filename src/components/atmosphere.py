@@ -23,3 +23,4 @@ class AtmosphericExtinction(ThroughputCurve):
             name=name,
             fill_value=fill_value,
         )
+        self.airmass = airmass

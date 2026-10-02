@@ -58,10 +58,24 @@ sim = InstrumentSimulator(
 )
 ```
 
+The simulator exposes its detector readout wavelength calibration as a
+`specreduce.wavesol1d.WavelengthSolution1D` object:
+
+```python
+solution = sim.wavelength_solution
+wavelength = solution.pix_to_wav(pixel) * solution.unit
+pixel = solution.wav_to_pix(wavelength.to_value(solution.unit))
+```
+
+`SpectrographModel.wavelength_solution` describes the native detector grid,
+while `InstrumentSimulator.wavelength_solution` describes the configured
+readout grid after binning. The `x_to_wavelength()` and `wavelength_to_x()`
+methods delegate to these solutions.
+
 When the spectrograph is constructed from components, the simulator obtains the
-fiber, collimator, grating, camera-lens, detector-window, and detector-QE
+fiber, collimator, grating, camera lens, camera window, and detector QE
 throughput curves directly from those components. `CLASSI_FIBER` carries the
-installed 10 m fiber length used for its attenuation curve. Additional passive
+installed 10-m fiber length used for its attenuation curve. Additional passive
 optics such as the pickoff mirror and order-blocking filter are attached once
 through `optical_elements`.
 

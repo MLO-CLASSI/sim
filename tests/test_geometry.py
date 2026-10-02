@@ -2,8 +2,9 @@ import numpy as np
 import pytest
 from astropy import units as u
 from numpy.testing import assert_allclose
+from specreduce.wavesol1d import WavelengthSolution1D
 
-from simulator import DetectorModel, SpectrographModel
+from simulator import DetectorModel, InstrumentSimulator, SpectrographModel
 
 
 def test_imx571_reference_geometry(imx571_spectrograph):
@@ -18,10 +19,52 @@ def test_imx571_reference_geometry(imx571_spectrograph):
     assert_allclose(model.spectral_fwhm_px.to_value(u.pixel), 14.001147024470933, rtol=1e-12)
 
 
+def test_spectrograph_exposes_specreduce_wavelength_solution(imx571_spectrograph):
+    solution = imx571_spectrograph.wavelength_solution
+
+    assert isinstance(solution, WavelengthSolution1D)
+    assert solution.bounds_pix == (0, imx571_spectrograph.detector.nx)
+    assert solution.unit == u.AA
+
+
+def test_wavelength_solution_matches_grating_geometry(imx571_spectrograph):
+    model = imx571_spectrograph
+    pixels = np.linspace(0, model.detector.nx - 1, 257)
+    center = model.x_center.to_value(u.pixel)
+    detector_offset = center - pixels
+    field_angle = np.arctan(
+        detector_offset
+        * (model.detector.pixel_size / model.camera_focal_length).to_value(
+            u.dimensionless_unscaled
+        )
+    ) * u.rad
+    diffraction_angle = model.diffraction_angle + field_angle
+    expected = (
+        model.groove_spacing
+        * (np.sin(model.incidence_angle) + np.sin(diffraction_angle))
+        / model.diffraction_order
+    ).to_value(u.AA)
+
+    actual = model.wavelength_solution.pix_to_wav(pixels)
+
+    assert_allclose(actual, expected, rtol=0, atol=2e-8)
+
+
+def test_simulator_exposes_binned_wavelength_solution(imx571_spectrograph):
+    simulator = InstrumentSimulator(
+        imx571_spectrograph,
+        binning=2,
+        throughputs=[],
+    )
+
+    assert simulator.wavelength_solution is simulator.readout_spectrograph.wavelength_solution
+    assert simulator.wavelength_solution.bounds_pix == (0, 3122)
+
+
 def test_central_wavelength_maps_to_detector_center(imx571_spectrograph):
     model = imx571_spectrograph
     x = model.wavelength_to_x(model.central_wavelength)
-    assert_allclose(x.to_value(u.pixel), model.x_center.to_value(u.pixel), atol=1e-12)
+    assert_allclose(x.to_value(u.pixel), model.x_center.to_value(u.pixel), atol=1e-5)
 
 
 def test_wavelength_x_round_trip(imx571_spectrograph):
@@ -30,7 +73,19 @@ def test_wavelength_x_round_trip(imx571_spectrograph):
 
     recovered = model.x_to_wavelength(model.wavelength_to_x(wavelength))
 
-    assert_allclose(recovered.to_value(u.AA), wavelength.to_value(u.AA), rtol=0, atol=1e-9)
+    assert_allclose(recovered.to_value(u.AA), wavelength.to_value(u.AA), rtol=0, atol=1e-4)
+
+
+def test_legacy_mapping_methods_delegate_to_wavelength_solution(imx571_spectrograph):
+    model = imx571_spectrograph
+    pixels = np.array([500.25, 1500.5, 3000.75])
+
+    assert_allclose(
+        model.x_to_wavelength(pixels * u.pixel).to_value(u.AA),
+        model.wavelength_solution.pix_to_wav(pixels),
+        rtol=0,
+        atol=0,
+    )
 
 
 def test_wavelength_direction_flag_changes_only_detector_orientation(imx571_detector):
@@ -50,11 +105,11 @@ def test_wavelength_direction_flag_changes_only_detector_orientation(imx571_dete
     dx_decreasing = decreasing.wavelength_to_x(wavelength) - decreasing.x_center
     dx_increasing = increasing.wavelength_to_x(wavelength) - increasing.x_center
 
-    assert_allclose(dx_increasing.to_value(u.pixel), -dx_decreasing.to_value(u.pixel), atol=1e-12)
+    assert_allclose(dx_increasing.to_value(u.pixel), -dx_decreasing.to_value(u.pixel), atol=1e-5)
     assert_allclose(
         increasing.x_to_wavelength(increasing.wavelength_to_x(wavelength)).to_value(u.AA),
         wavelength.to_value(u.AA),
-        atol=1e-9,
+        atol=1e-4,
     )
 
 

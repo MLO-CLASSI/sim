@@ -1,9 +1,12 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from functools import cached_property
 
 import numpy as np
 from astropy import constants as const, units as u
+from astropy.modeling import models
+from specreduce.wavesol1d import WavelengthSolution1D
 
 from .components import (
     AtmosphericExtinction,
@@ -20,6 +23,7 @@ from .components import (
 )
 
 FLUX_DENSITY_UNIT = u.erg / u.s / u.cm**2 / u.AA
+WAVELENGTH_SOLUTION_DEGREE = 4
 
 
 @dataclass
@@ -215,49 +219,21 @@ class SpectrographModel:
     def spectral_sigma_px(self) -> u.Quantity:
         return self.spectral_fwhm_px / (2 * np.sqrt(2 * np.log(2)))
 
-    def wavelength_to_x(self, wavelength: u.Quantity) -> u.Quantity:
-        wavelength = u.Quantity(wavelength).to(self.groove_spacing.unit)
-        sin_diffraction_angle = (
-            self.diffraction_order * wavelength / self.groove_spacing
-            - np.sin(self.incidence_angle)
-        ).to_value(u.dimensionless_unscaled)
-
-        if np.any(np.abs(sin_diffraction_angle) > 1):
-            raise ValueError(
-                "At least one wavelength is not physically reachable for the "
-                "configured grating geometry."
-            )
-
-        diffraction_angle = np.arcsin(sin_diffraction_angle) * u.rad
-        field_angle = diffraction_angle - self.diffraction_angle
-        detector_offset = (
-            self.camera_focal_length
-            * np.tan(field_angle)
-            / self.detector.pixel_size
-        ).to_value(u.dimensionless_unscaled) * u.pixel
-
+    def _exact_wavelength_for_pixel(self, pixel) -> np.ndarray:
+        pixel = np.asarray(pixel, dtype=float)
+        center = self.x_center.to_value(u.pixel)
         if self.wavelength_increases_with_x:
-            return self.x_center + detector_offset
-        return self.x_center - detector_offset
-
-    def x_to_wavelength(self, x: u.Quantity) -> u.Quantity:
-        x = u.Quantity(x, u.pixel)
-
-        if self.wavelength_increases_with_x:
-            detector_offset = x - self.x_center
+            detector_offset = pixel - center
         else:
-            detector_offset = self.x_center - x
+            detector_offset = center - pixel
 
         field_angle = np.arctan(
-            (
-                detector_offset
-                * self.detector.pixel_size
-                / (u.pixel * self.camera_focal_length)
-            ).to_value(u.dimensionless_unscaled)
+            detector_offset
+            * (self.detector.pixel_size / self.camera_focal_length).to_value(
+                u.dimensionless_unscaled
+            )
         ) * u.rad
-
         diffraction_angle = self.diffraction_angle + field_angle
-
         wavelength = (
             self.groove_spacing
             * (
@@ -267,7 +243,56 @@ class SpectrographModel:
             / self.diffraction_order
         )
 
-        return wavelength.to(u.AA)
+        return wavelength.to_value(u.AA)
+
+    @cached_property
+    def wavelength_solution(self) -> WavelengthSolution1D:
+        """Pixel-to-wavelength solution for this detector sampling."""
+        pixels = np.arange(self.detector.nx, dtype=float)
+        center = self.x_center.to_value(u.pixel)
+        wavelength = self._exact_wavelength_for_pixel(pixels)
+        coefficients = np.polynomial.polynomial.polyfit(
+            pixels - center,
+            wavelength,
+            WAVELENGTH_SOLUTION_DEGREE,
+        )
+        polynomial = models.Polynomial1D(
+            WAVELENGTH_SOLUTION_DEGREE,
+            **{
+                f"c{order}": coefficient
+                for order, coefficient in enumerate(coefficients)
+            },
+        )
+        pixel_to_wavelength = models.Shift(-center) | polynomial
+        return WavelengthSolution1D(
+            p2w=pixel_to_wavelength,
+            bounds_pix=(0, self.detector.nx),
+            unit=u.AA,
+        )
+
+    def wavelength_to_x(self, wavelength: u.Quantity) -> u.Quantity:
+        """Map wavelength to detector pixel using ``wavelength_solution``."""
+        wavelength = u.Quantity(wavelength).to(self.groove_spacing.unit)
+        sin_diffraction_angle = (
+            self.diffraction_order * wavelength / self.groove_spacing
+            - np.sin(self.incidence_angle)
+        ).to_value(u.dimensionless_unscaled)
+        if np.any(np.abs(sin_diffraction_angle) > 1):
+            raise ValueError(
+                "At least one wavelength is not physically reachable for the "
+                "configured grating geometry."
+            )
+
+        pixel = self.wavelength_solution.wav_to_pix(
+            wavelength.to_value(self.wavelength_solution.unit)
+        )
+        return np.asarray(pixel) * u.pixel
+
+    def x_to_wavelength(self, x: u.Quantity) -> u.Quantity:
+        """Map detector pixel to wavelength using ``wavelength_solution``."""
+        x = u.Quantity(x, u.pixel)
+        wavelength = self.wavelength_solution.pix_to_wav(x.to_value(u.pixel))
+        return np.asarray(wavelength) * self.wavelength_solution.unit
 
     def fiber_trace_centers(self) -> u.Quantity:
         offsets = (
@@ -366,6 +391,11 @@ class InstrumentSimulator:
             throughput *= curve(wavelength)
 
         return throughput
+
+    @property
+    def wavelength_solution(self) -> WavelengthSolution1D:
+        """Wavelength solution for the configured detector readout."""
+        return self.readout_spectrograph.wavelength_solution
 
     @property
     def fiber_sky_area(self) -> u.Quantity:

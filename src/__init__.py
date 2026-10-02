@@ -21,7 +21,7 @@ from .core import (
     f_lambda_to_photon_flux_density,
 )
 from .spec_wcs import LongSlitWCS
-from .utils import read_snifs_spectrum
+from .utils import read_reference_spectrum
 
 __all__ = [
     "AtmosphericExtinction",
@@ -41,5 +41,5 @@ __all__ = [
     "TelescopeModel",
     "ThroughputCurve",
     "f_lambda_to_photon_flux_density",
-    "read_snifs_spectrum",
+    "read_reference_spectrum",
 ]

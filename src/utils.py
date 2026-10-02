@@ -4,6 +4,27 @@ from astropy.io import fits
 from astropy.time import Time
 from astropy.table import Table
 
+
+class HeaderTable(Table):
+
+    @property
+    def header(self) -> dict:
+        return self.meta
+
+
+def read_reference_spectrum(filepath: Path):
+    if "SNIFS" in filepath.name.upper():
+        return read_snifs_spectrum(filepath)
+    if filepath.suffix.lower() == ".ecsv":
+        table = HeaderTable.read(filepath)
+        table.meta["OBJECT"] = table.meta.get("OBJECT", table.meta.get("TARGETID"))
+        if "coordinates" in table.meta:
+            coord = table.meta["coordinates"]
+            table.meta["RA"] = coord.ra.deg
+            table.meta["DEC"] = coord.dec.deg
+        return table
+
+
 def read_snifs_spectrum(filepath: Path) -> fits.BinTableHDU:
     data = Table.read(filepath, format="ascii.commented_header", names=["wl", "fl", "err"])
     data["wl"].unit = "Angstrom"

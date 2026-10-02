@@ -1,5 +1,6 @@
 import numpy as np
 from astropy import units as u
+from astropy.table import Table
 from shared_data import CSV_FILES
 
 from .optics import ThroughputCurve
@@ -12,14 +13,10 @@ class AtmosphericExtinction(ThroughputCurve):
         name: str = "atmosphere",
         fill_value: float = 0.0,
     ):
-        wavelength_nm, extinction_mag_per_airmass = np.loadtxt(
-            CSV_FILES["palomar_atm_ext_per_airmass"],
-            delimiter=",",
-        ).T
-        throughput = 10 ** (-0.4 * extinction_mag_per_airmass * airmass)
+        lsst_atm = Table.read(CSV_FILES["atm_lsst"]) # airmass 1.0
         super().__init__(
-            wavelength_nm * u.nm,
-            throughput,
+            lsst_atm["Wavelength"].quantity,
+            lsst_atm["Throughput"]**airmass,
             name=name,
             fill_value=fill_value,
         )
